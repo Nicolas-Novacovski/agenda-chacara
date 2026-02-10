@@ -4,7 +4,6 @@ import { Task, DailyLog } from '../types';
 const LOCAL_STORAGE_KEY = 'agenda_chacara_tasks';
 const LOCAL_LOGS_KEY = 'agenda_chacara_logs';
 
-// --- Auxiliares LocalStorage ---
 const getLocalTasks = (): Task[] => {
   const data = localStorage.getItem(LOCAL_STORAGE_KEY);
   return data ? JSON.parse(data) : [];
@@ -23,7 +22,6 @@ const saveLocalLogs = (logs: DailyLog[]) => {
   localStorage.setItem(LOCAL_LOGS_KEY, JSON.stringify(logs));
 };
 
-// --- Funções de Tarefas ---
 export const loadTasks = async (): Promise<Task[]> => {
   if (!isSupabaseConfigured || !supabase) {
     return getLocalTasks();
@@ -43,6 +41,7 @@ export const loadTasks = async (): Promise<Task[]> => {
       description: item.description,
       isCompleted: item.is_completed,
       recurrence: item.recurrence,
+      urgency: item.urgency || 'medium',
       specificDate: item.specific_date,
       monthReference: item.month_reference,
       category: item.category,
@@ -69,8 +68,10 @@ export const createTask = async (task: Omit<Task, 'id' | 'createdAt' | 'isComple
       .from('tasks')
       .insert([{
         title: task.title,
+        description: task.description,
         category: task.category,
         recurrence: task.recurrence,
+        urgency: task.urgency,
         specific_date: task.specificDate,
         month_reference: task.monthReference,
         is_completed: false
@@ -81,8 +82,10 @@ export const createTask = async (task: Omit<Task, 'id' | 'createdAt' | 'isComple
     return {
       id: data.id,
       title: data.title,
+      description: data.description,
       isCompleted: data.is_completed,
       recurrence: data.recurrence,
+      urgency: data.urgency,
       specificDate: data.specific_date,
       monthReference: data.month_reference,
       category: data.category,
@@ -112,10 +115,8 @@ export const deleteTaskFromDb = async (id: string): Promise<void> => {
   await supabase.from('tasks').delete().eq('id', id);
 };
 
-// --- Funções de Diário (Logs) ---
 export const saveDailyLog = async (content: string): Promise<void> => {
   const today = new Date().toISOString().split('T')[0];
-  
   if (!isSupabaseConfigured || !supabase) {
     const logs = getLocalLogs();
     const newLog: DailyLog = { 
@@ -127,7 +128,6 @@ export const saveDailyLog = async (content: string): Promise<void> => {
     saveLocalLogs([newLog, ...logs]);
     return;
   }
-
   try {
     await supabase.from('daily_logs').insert([{ content, log_date: today }]);
   } catch (err) {
@@ -135,16 +135,14 @@ export const saveDailyLog = async (content: string): Promise<void> => {
   }
 };
 
-export const getLatestLogs = async (limit = 5): Promise<DailyLog[]> => {
+export const getLatestLogs = async (limit = 10): Promise<DailyLog[]> => {
   if (!isSupabaseConfigured || !supabase) {
     return getLocalLogs().slice(0, limit);
   }
-
   const { data } = await supabase
     .from('daily_logs')
     .select('*')
     .order('created_at', { ascending: false })
     .limit(limit);
-
   return data || [];
 };

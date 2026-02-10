@@ -14,15 +14,16 @@ import {
   Loader2,
   Cloud,
   CloudOff,
-  Database,
   ChevronLeft,
   ChevronRight,
-  Wind,
-  Droplets,
   Sun,
-  PenTool
+  PenTool,
+  AlertTriangle,
+  Filter,
+  ArrowRight,
+  CloudSun
 } from 'lucide-react';
-import { Task as TaskType, ViewMode, CATEGORY_LABELS, MONTH_NAMES, DailyLog } from './types';
+import { Task as TaskType, ViewMode, CATEGORY_LABELS, MONTH_NAMES, DailyLog, UrgencyType } from './types';
 import { loadTasks, createTask, updateTaskStatus, deleteTaskFromDb, saveDailyLog, getLatestLogs } from './services/storageService';
 import { isSupabaseConfigured } from './services/supabaseClient';
 import TaskForm from './components/TaskForm';
@@ -37,10 +38,11 @@ const App: React.FC = () => {
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   
-  // Estados para o Calendário
+  // Filtros
+  const [filterUrgency, setFilterUrgency] = useState<UrgencyType | 'all'>('all');
+  const [filterCategory, setFilterCategory] = useState<string | 'all'>('all');
+
   const [calDate, setCalDate] = useState(new Date());
-  
-  // Estado para o Diário
   const [logInput, setLogInput] = useState('');
   const [isSavingLog, setIsSavingLog] = useState(false);
 
@@ -64,7 +66,7 @@ const App: React.FC = () => {
   };
 
   const deleteTask = async (taskId: string) => {
-    if (window.confirm('Excluir esta tarefa?')) {
+    if (window.confirm('Pai, deseja mesmo apagar esta tarefa?')) {
       setTasks(prev => prev.filter(t => t.id !== taskId));
       await deleteTaskFromDb(taskId);
     }
@@ -85,17 +87,21 @@ const App: React.FC = () => {
     setIsSavingLog(false);
   };
 
-  // Lógica do Calendário
+  const filteredTasks = useMemo(() => {
+    return tasks.filter(t => {
+      const matchUrgency = filterUrgency === 'all' || t.urgency === filterUrgency;
+      const matchCategory = filterCategory === 'all' || t.category === filterCategory;
+      return matchUrgency && matchCategory;
+    });
+  }, [tasks, filterUrgency, filterCategory]);
+
   const calendarDays = useMemo(() => {
     const year = calDate.getFullYear();
     const month = calDate.getMonth();
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-    
     const days = [];
-    // Espaços vazios do começo
     for (let i = 0; i < firstDay; i++) days.push(null);
-    // Dias do mês
     for (let i = 1; i <= daysInMonth; i++) days.push(i);
     return days;
   }, [calDate]);
@@ -106,153 +112,176 @@ const App: React.FC = () => {
     return tasks.filter(t => t.specificDate === dateStr);
   };
 
-  // Sugestões de Plantio (Simulado baseado no mês)
   const plantingTips = useMemo(() => {
     const month = new Date().getMonth();
     const tips = [
-      ["Alface", "Couve", "Rabanete"], // Jan
-      ["Cenoura", "Beterraba", "Salsa"], // Fev
-      ["Brócolis", "Espinafre", "Ervilha"], // Mar
-      ["Alho", "Cebola", "Morango"], // Abr
-      ["Couve-flor", "Repolho", "Feijão"], // Mai
-      ["Milho", "Abóbora", "Pepino"], // Jun
-      ["Batata", "Tomate", "Pimentão"], // Jul
-      ["Melancia", "Melão", "Quiabo"], // Ago
-      ["Berinjela", "Jiló", "Vagem"], // Set
-      ["Arroz", "Amendoim", "Soja"], // Out
-      ["Mandioca", "Inhame", "Batata-doce"], // Nov
-      ["Girassol", "Gergelim", "Chia"] // Dez
+      ["Alface", "Couve", "Rabanete"], ["Cenoura", "Beterraba", "Salsa"],
+      ["Brócolis", "Espinafre", "Ervilha"], ["Alho", "Cebola", "Morango"],
+      ["Couve-flor", "Repolho", "Feijão"], ["Milho", "Abóbora", "Pepino"],
+      ["Batata", "Tomate", "Pimentão"], ["Melancia", "Melão", "Quiabo"],
+      ["Berinjela", "Jiló", "Vagem"], ["Arroz", "Amendoim", "Soja"],
+      ["Mandioca", "Inhame", "Batata-doce"], ["Girassol", "Gergelim", "Chia"]
     ];
     return tips[month] || ["Hortaliças em geral"];
   }, []);
 
-  const renderTaskCard = (task: TaskType) => (
-    <div key={task.id} className={`group bg-white p-4 rounded-xl border transition-all duration-200 hover:shadow-md flex items-start gap-3 ${task.isCompleted ? 'border-stone-100 opacity-60' : 'border-stone-200 border-l-4 border-l-nature-moss'}`}>
-      <button onClick={() => toggleTask(task.id)} className={`mt-1 transition-colors ${task.isCompleted ? 'text-nature-moss' : 'text-stone-300 hover:text-nature-moss'}`}>
-        {task.isCompleted ? <CheckCircle2 size={24} /> : <Circle size={24} />}
-      </button>
-      <div className="flex-1">
-        <h3 className={`font-bold text-lg leading-tight ${task.isCompleted ? 'line-through text-stone-400' : 'text-stone-800'}`}>{task.title}</h3>
-        <div className="flex gap-2 mt-1">
-          <span className="text-xs font-bold uppercase text-nature-earth bg-nature-sand px-2 py-0.5 rounded-full">{CATEGORY_LABELS[task.category]}</span>
-          {task.specificDate && <span className="text-xs text-stone-500 font-medium">{new Date(task.specificDate + 'T12:00:00').toLocaleDateString('pt-BR')}</span>}
+  const renderTaskCard = (task: TaskType) => {
+    const urgencyStyles = {
+      high: 'border-l-red-500 bg-red-50/30',
+      medium: 'border-l-nature-moss bg-white',
+      low: 'border-l-stone-300 bg-white'
+    };
+
+    return (
+      <div key={task.id} className={`group p-5 rounded-2xl border-2 border-stone-100 transition-all duration-300 hover:shadow-xl hover:scale-[1.01] flex flex-col gap-3 border-l-8 ${task.isCompleted ? 'opacity-50 grayscale border-l-stone-200' : urgencyStyles[task.urgency]}`}>
+        <div className="flex items-start gap-4">
+          <button onClick={() => toggleTask(task.id)} className={`mt-1 transition-transform active:scale-75 ${task.isCompleted ? 'text-nature-moss' : 'text-stone-300 hover:text-nature-moss'}`}>
+            {task.isCompleted ? <CheckCircle2 size={32} /> : <Circle size={32} />}
+          </button>
+          
+          <div className="flex-1">
+            <div className="flex justify-between items-start">
+              <h3 className={`font-black text-xl leading-tight ${task.isCompleted ? 'line-through text-stone-400' : 'text-stone-800'}`}>
+                {task.title}
+              </h3>
+              <button onClick={() => deleteTask(task.id)} className="text-stone-300 hover:text-red-500 transition-opacity opacity-0 group-hover:opacity-100 p-1">
+                <Trash2 size={20} />
+              </button>
+            </div>
+            
+            {task.description && !task.isCompleted && (
+              <p className="text-sm text-stone-600 mt-2 bg-white/50 p-2 rounded-lg border border-dashed border-stone-200 italic">
+                {task.description}
+              </p>
+            )}
+
+            <div className="flex flex-wrap gap-2 mt-3">
+              <span className="text-[10px] font-black uppercase text-nature-earth bg-nature-sand px-3 py-1 rounded-full shadow-sm">{CATEGORY_LABELS[task.category]}</span>
+              {task.urgency === 'high' && !task.isCompleted && (
+                <span className="text-[10px] font-black uppercase text-red-600 bg-red-100 px-3 py-1 rounded-full flex items-center gap-1">
+                  <AlertTriangle size={10} /> Urgente
+                </span>
+              )}
+              {task.specificDate && <span className="text-[10px] font-black text-stone-500 bg-stone-100 px-3 py-1 rounded-full">{new Date(task.specificDate + 'T12:00:00').toLocaleDateString('pt-BR')}</span>}
+            </div>
+          </div>
         </div>
       </div>
-      <button onClick={() => deleteTask(task.id)} className="text-stone-300 hover:text-red-500 transition-opacity opacity-0 group-hover:opacity-100"><Trash2 size={18} /></button>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="min-h-screen bg-nature-offWhite text-stone-800 font-sans flex flex-col lg:flex-row">
       {/* Mobile Nav */}
-      <div className="lg:hidden bg-nature-mossDark text-white p-4 flex justify-between items-center sticky top-0 z-30 shadow-md">
-        <span className="font-bold text-xl flex items-center gap-2"><Sprout /> Agenda da Chácara</span>
-        <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="p-2 bg-white/10 rounded-lg">{mobileMenuOpen ? <X /> : <Menu />}</button>
+      <div className="lg:hidden bg-nature-mossDark text-white p-5 flex justify-between items-center sticky top-0 z-30 shadow-lg">
+        <span className="font-black text-xl flex items-center gap-3"><Sprout size={24} /> Agenda do Pai</span>
+        <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="p-3 bg-white/10 rounded-xl">{mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}</button>
       </div>
 
       {/* Sidebar */}
-      <aside className={`fixed lg:static inset-y-0 left-0 z-40 w-72 bg-nature-mossDark text-nature-sand flex flex-col transition-transform duration-300 ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
-        <div className="p-8 hidden lg:block">
-          <h1 className="text-2xl font-black tracking-tight flex items-center gap-3"><Sprout className="text-nature-moss" size={32} /> Agenda da Chácara</h1>
-          <p className="text-nature-sand/40 text-xs mt-1 uppercase font-bold tracking-widest">Gestão Rural Inteligente</p>
+      <aside className={`fixed lg:static inset-y-0 left-0 z-40 w-80 bg-nature-mossDark text-nature-sand flex flex-col transition-transform duration-500 ease-in-out ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+        <div className="p-10 hidden lg:block">
+          <h1 className="text-3xl font-black tracking-tighter flex items-center gap-4"><Sprout className="text-nature-moss" size={40} /> Agenda Rural</h1>
+          <p className="text-nature-sand/30 text-[10px] mt-2 uppercase font-black tracking-[0.3em]">Gestão de Chácara</p>
         </div>
         
-        <nav className="flex-1 px-4 space-y-2 py-4">
-          <button onClick={() => { setView('dashboard'); setMobileMenuOpen(false); }} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold ${view === 'dashboard' ? 'bg-nature-moss text-white shadow-lg' : 'hover:bg-white/5 text-stone-400'}`}><Layout size={24} /> Início</button>
-          <button onClick={() => { setView('calendar'); setMobileMenuOpen(false); }} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold ${view === 'calendar' ? 'bg-nature-moss text-white shadow-lg' : 'hover:bg-white/5 text-stone-400'}`}><CalendarIcon size={24} /> Calendário</button>
-          <button onClick={() => { setView('tasks'); setMobileMenuOpen(false); }} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl transition-all font-bold ${view === 'tasks' ? 'bg-nature-moss text-white shadow-lg' : 'hover:bg-white/5 text-stone-400'}`}><List size={24} /> Tarefas</button>
+        <nav className="flex-1 px-6 space-y-3 py-6">
+          <button onClick={() => { setView('dashboard'); setMobileMenuOpen(false); }} className={`w-full flex items-center gap-5 px-6 py-5 rounded-[1.5rem] transition-all font-black text-lg ${view === 'dashboard' ? 'bg-nature-moss text-white shadow-xl scale-[1.02]' : 'hover:bg-white/5 text-stone-500'}`}><Layout size={28} /> Painel</button>
+          <button onClick={() => { setView('calendar'); setMobileMenuOpen(false); }} className={`w-full flex items-center gap-5 px-6 py-5 rounded-[1.5rem] transition-all font-black text-lg ${view === 'calendar' ? 'bg-nature-moss text-white shadow-xl scale-[1.02]' : 'hover:bg-white/5 text-stone-500'}`}><CalendarIcon size={28} /> Calendário</button>
+          <button onClick={() => { setView('tasks'); setMobileMenuOpen(false); }} className={`w-full flex items-center gap-5 px-6 py-5 rounded-[1.5rem] transition-all font-black text-lg ${view === 'tasks' ? 'bg-nature-moss text-white shadow-xl scale-[1.02]' : 'hover:bg-white/5 text-stone-500'}`}><List size={28} /> Ver Tudo</button>
         </nav>
 
-        <div className="p-6 space-y-4">
-          <button onClick={() => setIsAssistantOpen(true)} className="w-full flex items-center justify-center gap-3 bg-nature-earth text-white py-4 rounded-2xl shadow-xl hover:scale-[1.02] active:scale-95 transition-all font-bold border-b-4 border-[#6a5b3d]"><Sprout size={24} /> Agrônomo Virtual</button>
-          <div className="flex items-center gap-3 px-4 py-3 bg-black/20 rounded-xl">
-            {isSupabaseConfigured ? <Cloud className="text-green-400" size={18} /> : <CloudOff className="text-amber-400" size={18} />}
-            <span className="text-[10px] uppercase font-black tracking-widest text-stone-300">{isSupabaseConfigured ? 'Sincronizado' : 'Modo Local'}</span>
+        <div className="p-8 space-y-6">
+          <button onClick={() => setIsAssistantOpen(true)} className="w-full flex items-center justify-center gap-4 bg-nature-earth text-white py-5 rounded-[2rem] shadow-2xl hover:bg-[#7a6845] active:scale-95 transition-all font-black border-b-8 border-[#6a5b3d]"><Sprout size={32} /> Conversar com Agrônomo</button>
+          <div className="flex items-center gap-4 px-6 py-4 bg-black/30 rounded-2xl">
+            {isSupabaseConfigured ? <Cloud className="text-green-400" size={20} /> : <CloudOff className="text-amber-400" size={20} />}
+            <span className="text-[10px] uppercase font-black tracking-widest text-stone-400">{isSupabaseConfigured ? 'Seguro na Nuvem' : 'Apenas no Celular'}</span>
           </div>
         </div>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-y-auto p-4 lg:p-10">
-        <div className="max-w-5xl mx-auto space-y-10">
+      {/* Backdrop */}
+      {mobileMenuOpen && <div className="fixed inset-0 bg-black/60 z-30 lg:hidden" onClick={() => setMobileMenuOpen(false)}></div>}
+
+      {/* Main */}
+      <main className="flex-1 overflow-y-auto p-6 lg:p-12">
+        <div className="max-w-4xl mx-auto space-y-12">
           {loading ? (
             <div className="h-[70vh] flex flex-col items-center justify-center text-stone-400">
-              <Loader2 className="animate-spin mb-4 text-nature-moss" size={48} />
-              <p className="font-bold text-lg">Organizando a lida...</p>
+              <Loader2 className="animate-spin mb-6 text-nature-moss" size={64} />
+              <p className="font-black text-2xl uppercase tracking-widest">Organizando a lida...</p>
             </div>
           ) : (
             <>
               {view === 'dashboard' && (
-                <div className="space-y-10 animate-fade-in">
-                  {/* Hero Dashboard */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="bg-gradient-to-br from-nature-mossDark to-nature-moss p-8 rounded-[2.5rem] text-white shadow-2xl relative overflow-hidden">
-                      <div className="relative z-10">
-                        <p className="text-nature-sand/60 font-black uppercase text-xs tracking-widest mb-1">Status da Chácara</p>
-                        <h2 className="text-4xl font-black mb-6">Bom trabalho, pai!</h2>
-                        <div className="flex gap-6">
-                          <div><p className="text-3xl font-black">{tasks.filter(t => !t.isCompleted).length}</p><p className="text-xs opacity-60 uppercase font-bold">Pendentes</p></div>
-                          <div className="w-px h-10 bg-white/20"></div>
-                          <div><p className="text-3xl font-black">{tasks.filter(t => t.isCompleted).length}</p><p className="text-xs opacity-60 uppercase font-bold">Feitas</p></div>
-                        </div>
-                      </div>
-                      <Sprout size={160} className="absolute -bottom-10 -right-10 opacity-10 rotate-12" />
+                <div className="space-y-12 animate-fade-in">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {/* Clima Mock */}
+                    <div className="bg-gradient-to-br from-sky-400 to-blue-500 p-8 rounded-[2.5rem] text-white shadow-xl flex flex-col justify-between">
+                       <div className="flex justify-between items-start">
+                          <div>
+                            <p className="text-white/60 font-black text-[10px] uppercase tracking-widest">Clima na Chácara</p>
+                            <h4 className="text-4xl font-black">28°C</h4>
+                          </div>
+                          <CloudSun size={48} className="text-white/80" />
+                       </div>
+                       <p className="font-bold text-sm mt-4">Sol entre nuvens.<br/>Ideal para limpeza.</p>
                     </div>
 
-                    <div className="bg-white p-8 rounded-[2.5rem] border border-stone-200 shadow-sm flex flex-col justify-center">
-                      <div className="flex items-center gap-3 mb-4 text-nature-earth">
-                        <CalendarDays size={28} />
-                        <h3 className="font-black uppercase text-sm tracking-widest">O que plantar em {MONTH_NAMES[new Date().getMonth()]}</h3>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {plantingTips.map(tip => (
-                          <span key={tip} className="px-4 py-2 bg-nature-sand text-nature-earth rounded-xl font-bold text-sm">🌱 {tip}</span>
-                        ))}
-                      </div>
-                      <p className="text-xs text-stone-400 mt-4 italic">* Sugestões baseadas na estação atual.</p>
+                    <div className="bg-nature-mossDark p-8 rounded-[2.5rem] text-white shadow-xl md:col-span-2 relative overflow-hidden">
+                       <div className="relative z-10">
+                         <h2 className="text-4xl font-black mb-4 tracking-tighter">Bom dia, pai!</h2>
+                         <p className="text-nature-sand/60 font-bold max-w-xs">Temos {tasks.filter(t => t.urgency === 'high' && !t.isCompleted).length} coisas urgentes hoje.</p>
+                         <button onClick={() => setView('tasks')} className="mt-6 flex items-center gap-2 bg-nature-moss px-6 py-3 rounded-2xl font-black text-sm hover:gap-4 transition-all uppercase tracking-widest">Ver Urgências <ArrowRight size={18}/></button>
+                       </div>
+                       <Sprout size={180} className="absolute -bottom-10 -right-10 opacity-10 rotate-12" />
                     </div>
                   </div>
 
-                  {/* Diário da Roça */}
-                  <div className="bg-white p-6 rounded-3xl border border-stone-200 shadow-sm space-y-4">
-                    <div className="flex items-center gap-2 text-nature-mossDark">
-                      <PenTool size={20} />
-                      <h3 className="font-black uppercase text-sm tracking-widest">Diário da Roça (Observações)</h3>
+                  {/* Diário Compacto */}
+                  <div className="bg-white p-8 rounded-[2.5rem] border-2 border-stone-100 shadow-sm space-y-6">
+                    <div className="flex items-center gap-4 text-nature-mossDark">
+                      <div className="p-3 bg-nature-sand rounded-2xl"><PenTool size={28} /></div>
+                      <div>
+                        <h3 className="font-black text-xl">O que aconteceu hoje?</h3>
+                        <p className="text-stone-400 text-xs font-bold uppercase tracking-widest">Diário de Observações</p>
+                      </div>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-3">
                       <input 
                         value={logInput}
                         onChange={(e) => setLogInput(e.target.value)}
-                        placeholder="Ex: Choveu 20mm hoje, Geada forte na baixada..." 
-                        className="flex-1 bg-stone-50 border border-stone-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-nature-moss outline-none"
+                        placeholder="Ex: Começamos a colheita, choveu granizo..." 
+                        className="flex-1 bg-stone-50 border-2 border-stone-100 rounded-[1.5rem] px-6 py-4 text-lg font-bold focus:border-nature-moss outline-none transition-all"
                       />
                       <button 
                         onClick={handleSaveLog}
                         disabled={isSavingLog || !logInput.trim()}
-                        className="px-6 py-3 bg-nature-earth text-white rounded-xl font-bold active:scale-95 disabled:opacity-50 transition-all"
+                        className="px-8 bg-nature-earth text-white rounded-[1.5rem] font-black active:scale-95 disabled:opacity-50 transition-all shadow-lg shadow-nature-earth/20"
                       >
-                        {isSavingLog ? '...' : 'Salvar'}
+                        {isSavingLog ? '...' : 'SALVAR'}
                       </button>
                     </div>
-                    {logs.length > 0 && (
-                      <div className="space-y-2 mt-4">
-                        {logs.map(log => (
-                          <div key={log.id} className="text-xs bg-stone-50 p-3 rounded-lg flex justify-between gap-4 border-l-2 border-nature-earth">
-                            <span className="text-stone-700 font-medium">{log.content}</span>
-                            <span className="text-stone-400 shrink-0">{new Date(log.log_date + 'T12:00:00').toLocaleDateString('pt-BR')}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
+                      {logs.slice(0, 4).map(log => (
+                        <div key={log.id} className="text-xs bg-stone-50 p-4 rounded-2xl flex flex-col gap-2 border-l-4 border-nature-earth shadow-sm">
+                          <p className="text-stone-800 font-bold leading-relaxed">"{log.content}"</p>
+                          <span className="text-stone-400 font-black uppercase text-[9px]">{new Date(log.log_date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
 
-                  {/* Tarefas de Hoje */}
+                  {/* Urgentes */}
                   <section>
-                    <h2 className="text-xl font-black text-nature-mossDark mb-6 flex items-center gap-3"><Sun className="text-orange-400" /> Para Hoje</h2>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {tasks.filter(t => t.specificDate === new Date().toISOString().split('T')[0] && !t.isCompleted).map(t => renderTaskCard(t))}
-                      {tasks.filter(t => t.specificDate === new Date().toISOString().split('T')[0] && !t.isCompleted).length === 0 && (
-                        <div className="col-span-full py-10 border-2 border-dashed border-stone-200 rounded-3xl text-center text-stone-400 font-bold">Sem tarefas marcadas para hoje.</div>
+                    <div className="flex justify-between items-center mb-6">
+                       <h2 className="text-2xl font-black text-nature-mossDark flex items-center gap-3"><AlertTriangle className="text-red-500" /> Coisas Urgentes</h2>
+                    </div>
+                    <div className="space-y-4">
+                      {tasks.filter(t => t.urgency === 'high' && !t.isCompleted).length > 0 ? (
+                        tasks.filter(t => t.urgency === 'high' && !t.isCompleted).map(renderTaskCard)
+                      ) : (
+                        <div className="py-12 border-4 border-dashed border-stone-100 rounded-[2.5rem] text-center text-stone-300 font-black uppercase tracking-widest">Tudo tranquilo por enquanto!</div>
                       )}
                     </div>
                   </section>
@@ -260,30 +289,30 @@ const App: React.FC = () => {
               )}
 
               {view === 'calendar' && (
-                <div className="bg-white rounded-[2.5rem] border border-stone-200 shadow-xl overflow-hidden animate-fade-in">
-                  <div className="bg-nature-mossDark p-8 flex justify-between items-center text-white">
-                    <h2 className="text-2xl font-black capitalize">{MONTH_NAMES[calDate.getMonth()]} {calDate.getFullYear()}</h2>
-                    <div className="flex gap-2">
-                      <button onClick={() => setCalDate(new Date(calDate.getFullYear(), calDate.getMonth() - 1))} className="p-2 hover:bg-white/10 rounded-full"><ChevronLeft /></button>
-                      <button onClick={() => setCalDate(new Date())} className="px-4 py-2 bg-white text-nature-mossDark rounded-xl font-black text-xs uppercase tracking-widest">Hoje</button>
-                      <button onClick={() => setCalDate(new Date(calDate.getFullYear(), calDate.getMonth() + 1))} className="p-2 hover:bg-white/10 rounded-full"><ChevronRight /></button>
+                <div className="bg-white rounded-[3rem] border-2 border-stone-100 shadow-2xl overflow-hidden animate-fade-in">
+                  <div className="bg-nature-mossDark p-10 flex flex-col sm:flex-row justify-between items-center gap-6 text-white">
+                    <h2 className="text-4xl font-black capitalize tracking-tighter">{MONTH_NAMES[calDate.getMonth()]} {calDate.getFullYear()}</h2>
+                    <div className="flex gap-3">
+                      <button onClick={() => setCalDate(new Date(calDate.getFullYear(), calDate.getMonth() - 1))} className="p-4 hover:bg-white/10 rounded-2xl transition-all"><ChevronLeft size={32} /></button>
+                      <button onClick={() => setCalDate(new Date())} className="px-8 py-3 bg-white text-nature-mossDark rounded-2xl font-black text-sm uppercase tracking-widest shadow-lg">Hoje</button>
+                      <button onClick={() => setCalDate(new Date(calDate.getFullYear(), calDate.getMonth() + 1))} className="p-4 hover:bg-white/10 rounded-2xl transition-all"><ChevronRight size={32} /></button>
                     </div>
                   </div>
-                  <div className="p-6">
-                    <div className="grid grid-cols-7 mb-4">
-                      {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(d => (
-                        <div key={d} className="text-center text-[10px] font-black uppercase text-stone-400 tracking-widest">{d}</div>
+                  <div className="p-8">
+                    <div className="grid grid-cols-7 mb-6">
+                      {['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'].map(d => (
+                        <div key={d} className="text-center text-[10px] font-black text-stone-400 tracking-[0.2em]">{d}</div>
                       ))}
                     </div>
-                    <div className="grid grid-cols-7 gap-2">
+                    <div className="grid grid-cols-7 gap-4">
                       {calendarDays.map((day, i) => (
-                        <div key={i} className={`aspect-square rounded-2xl border flex flex-col items-center justify-center relative ${day ? 'border-stone-100 bg-stone-50/50 hover:bg-white hover:shadow-md transition-all cursor-pointer' : 'border-transparent'}`}>
+                        <div key={i} className={`aspect-square rounded-[2rem] border-2 flex flex-col items-center justify-center relative transition-all ${day ? 'border-stone-50 bg-stone-50/50 hover:bg-white hover:shadow-xl hover:scale-110 cursor-pointer' : 'border-transparent'}`}>
                           {day && (
                             <>
-                              <span className="font-bold text-stone-600">{day}</span>
-                              <div className="flex gap-0.5 mt-1">
+                              <span className="font-black text-xl text-stone-700">{day}</span>
+                              <div className="flex gap-1 mt-2">
                                 {getTasksForDay(day).slice(0, 3).map((t, idx) => (
-                                  <div key={idx} className={`w-1.5 h-1.5 rounded-full ${t.isCompleted ? 'bg-stone-300' : 'bg-nature-moss'}`}></div>
+                                  <div key={idx} className={`w-2 h-2 rounded-full ${t.urgency === 'high' ? 'bg-red-500' : 'bg-nature-moss'}`}></div>
                                 ))}
                               </div>
                             </>
@@ -296,13 +325,44 @@ const App: React.FC = () => {
               )}
 
               {view === 'tasks' && (
-                <div className="space-y-6 animate-fade-in">
-                  <div className="flex justify-between items-end">
-                    <h2 className="text-4xl font-black text-nature-mossDark">Tarefas</h2>
-                    <span className="bg-nature-sand px-4 py-2 rounded-xl text-nature-earth font-black text-xs">{tasks.length} total</span>
+                <div className="space-y-8 animate-fade-in">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-6">
+                    <h2 className="text-5xl font-black text-nature-mossDark tracking-tighter">Tarefas</h2>
+                    
+                    {/* Filtros */}
+                    <div className="flex flex-wrap gap-2">
+                       <select 
+                         value={filterUrgency} 
+                         onChange={(e) => setFilterUrgency(e.target.value as any)}
+                         className="bg-white border-2 border-stone-100 rounded-xl px-4 py-2 text-xs font-black uppercase outline-none focus:border-nature-moss"
+                       >
+                         <option value="all">Todas Urgências</option>
+                         <option value="high">Apenas URGENTE</option>
+                         <option value="medium">Média Prioridade</option>
+                         <option value="low">Baixa Prioridade</option>
+                       </select>
+                       <select 
+                         value={filterCategory} 
+                         onChange={(e) => setFilterCategory(e.target.value)}
+                         className="bg-white border-2 border-stone-100 rounded-xl px-4 py-2 text-xs font-black uppercase outline-none focus:border-nature-moss"
+                       >
+                         <option value="all">Todas Categorias</option>
+                         <option value="planting">Plantio</option>
+                         <option value="maintenance">Manutenção</option>
+                         <option value="animals">Animais</option>
+                       </select>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {tasks.map(t => renderTaskCard(t))}
+
+                  <div className="grid grid-cols-1 gap-4">
+                    {filteredTasks.length > 0 ? (
+                      filteredTasks.map(renderTaskCard)
+                    ) : (
+                      <div className="py-20 text-center bg-white rounded-[2.5rem] border-2 border-dashed border-stone-100">
+                        <Filter className="mx-auto text-stone-200 mb-4" size={48} />
+                        <p className="text-stone-400 font-black uppercase tracking-widest">Nenhuma tarefa encontrada com esses filtros.</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -310,13 +370,13 @@ const App: React.FC = () => {
           )}
         </div>
 
-        {/* FAB */}
-        <button onClick={() => setIsFormOpen(true)} className="fixed bottom-8 right-8 w-16 h-16 bg-nature-moss text-white rounded-full shadow-2xl flex items-center justify-center hover:scale-110 active:scale-95 transition-all z-50 border-b-4 border-nature-mossDark">
-          <Plus size={32} />
+        {/* FAB Principal */}
+        <button onClick={() => setIsFormOpen(true)} className="fixed bottom-10 right-10 w-20 h-20 bg-nature-moss text-white rounded-[2rem] shadow-2xl flex items-center justify-center hover:scale-110 hover:rotate-90 active:scale-90 transition-all z-50 border-b-8 border-nature-mossDark">
+          <Plus size={48} />
         </button>
       </main>
 
-      {/* Modals */}
+      {/* Modais */}
       {isFormOpen && <TaskForm onClose={() => setIsFormOpen(false)} onSave={addTask} />}
       {isAssistantOpen && <AssistantModal onClose={() => setIsAssistantOpen(false)} />}
     </div>
