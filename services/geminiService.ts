@@ -1,14 +1,14 @@
 import { GoogleGenAI } from "@google/genai";
 
 const apiKey = process.env.API_KEY || '';
-const ai = new GoogleGenAI({ apiKey });
 
 export const getFarmingAdvice = async (query: string): Promise<string> => {
   if (!apiKey) {
-    return "Chave de API não configurada. Por favor, verifique a configuração.";
+    return "Chave de API do Gemini não configurada nas variáveis de ambiente do Vercel.";
   }
 
   try {
+    const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: query,
@@ -24,6 +24,6 @@ export const getFarmingAdvice = async (query: string): Promise<string> => {
     return response.text || "Desculpe, não consegui gerar uma resposta no momento.";
   } catch (error) {
     console.error("Erro ao consultar Gemini:", error);
-    return "Ocorreu um erro ao consultar o assistente virtual. Verifique sua conexão.";
+    return "Ocorreu um erro ao consultar o assistente virtual. Verifique sua conexão ou a validade da chave API.";
   }
 };
